@@ -388,4 +388,133 @@ class ChengyuBot:
             correct = self.df.sample(1).iloc[0]
             
             # Seleccionar 3 opciones incorrectas
-            wrong_options = self.df
+            wrong_options = self.df[self.df.index != correct.name].sample(3)
+            
+            # Crear opciones
+            all_options = [correct] + wrong_options.to_dict('records')
+            random.shuffle(all_options)
+            
+            # Encontrar índice de la respuesta correcta
+            correct_index = None
+            for i, opt in enumerate(all_options):
+                if opt.get('Chengyu 成语') == correct.get('Chengyu 成语'):
+                    correct_index = i
+                    break
+            
+            # Crear teclado
+            keyboard = []
+            for i, opt in enumerate(all_options):
+                venezolano = str(opt.get('Equivalente en Venezolano', 'N/A'))
+                display_text = venezolano[:45] + "..." if len(venezolano) > 45 else venezolano
+                keyboard.append([InlineKeyboardButton(
+                    display_text,
+                    callback_data=f"ans_{i}_{correct_index}_{correct.name}"
+                )])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            chengyu = str(correct.get('Chengyu 成语', 'N/A'))
+            pinyin = str(correct.get('Pinyin', 'N/A'))
+            
+            await update.message.reply_text(
+                f"❓ *Quiz:* ¿Cuál es el equivalente venezolano de:\n\n*{chengyu}* ({pinyin})?",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error en quiz: {e}")
+            await update.message.reply_text(f"❌ Error al crear quiz: {str(e)}")
+
+    async def answer_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Manejador de respuestas del quiz mejorado"""
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            parts = query.data.split('_')
+            selected_idx = int(parts[1])
+            correct_idx = int(parts[2])
+            correct_row_idx = int(parts[3])
+            
+            correct_row = self.df.loc[correct_row_idx]
+            
+            if selected_idx == correct_idx:
+                msg = "✅ ¡Correcto! "
+            else:
+                msg = "❌ Incorrecto. "
+                
+            msg += f"La respuesta correcta es:\n{self.format_chengyu(correct_row)}"
+            await query.edit_message_text(msg, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error en answer_handler: {e}")
+            await query.edit_message_text(f"❌ Error al procesar respuesta: {str(e)}")
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /ayuda actualizado"""
+        help_text = f"""
+🇨🇳 *Ayuda - Bot de Chengyus* 🇻🇪
+
+📊 *Estado actual:*
+• Chengyus: {len(self.df)}
+• Categorías: {len(self.categorias)}
+
+*Comandos disponibles:*
+/start - Mensaje de bienvenida
+/chengyu - Chengyu aleatorio
+/dia [1-{len(self.df) if not self.df.empty else 50}] - Chengyu específico
+/categorias - Explorar por categorías
+/hsk [HSK6/HSK7/HSK8/HSK9] - Filtrar por nivel
+/quiz - Quiz interactivo
+/debug - Información del sistema
+/ayuda - Esta ayuda
+
+*Ejemplos de uso:*
+`/dia 15` - Muestra el chengyu del día 15
+`/hsk HSK7` - Muestra chengyus de nivel HSK7
+
+¡Aprende expresiones chinas con sabiduría venezolana!
+        """
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+
+def main():
+    """Función principal con manejo robusto de errores"""
+    # Verificar token
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        logger.error("❌ BOT_TOKEN no encontrado en variables de entorno")
+        print("❌ ERROR: BOT_TOKEN no configurado")
+        return
+    
+    logger.info("🚀 Iniciando bot de chengyus...")
+    
+    # Crear aplicación
+    try:
+        application = Application.builder().token(token).build()
+        bot = ChengyuBot()
+        
+        # Agregar handlers
+        application.add_handler(CommandHandler('start', bot.start))
+        application.add_handler(CommandHandler('chengyu', bot.random_chengyu))
+        application.add_handler(CommandHandler('dia', bot.daily_chengyu))
+        application.add_handler(CommandHandler('categorias', bot.show_categories))
+        application.add_handler(CommandHandler('hsk', bot.hsk_filter))
+        application.add_handler(CommandHandler('quiz', bot.quiz))
+        application.add_handler(CommandHandler('debug', bot.debug_command))
+        application.add_handler(CommandHandler('ayuda', bot.help_command))
+        
+        # Handlers para botones
+        application.add_handler(CallbackQueryHandler(bot.category_handler, pattern=r"^cat_"))
+        application.add_handler(CallbackQueryHandler(bot.answer_handler, pattern=r"^ans_"))
+        
+        logger.info("✅ Bot configurado exitosamente")
+        print("✅ Bot iniciado. Presiona Ctrl+C para detener.")
+        
+        # Ejecutar bot
+        application.run_polling()
+        
+    except Exception as e:
+        logger.error(f"❌ Error al iniciar bot: {e}")
+        print(f"❌ ERROR al iniciar bot: {e}")
+
+if __name__ == '__main__':
+    main()
+
