@@ -334,8 +334,6 @@ class ChengyuBot:
 
 ¡Aprende expresiones idiomáticas chinas con sus equivalentes en refranes venezolanos!
 
-📊 *Disponibles:* {total_chengyus} chengyus
-📂 *Fuente de datos:* {self.data_source}
 
 *Comandos disponibles:*
 /chengyu - Obtén un chengyu aleatorio
