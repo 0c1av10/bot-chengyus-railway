@@ -5,7 +5,7 @@ import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Configurar logging
+# Configurar logging detallado
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -14,42 +14,189 @@ logger = logging.getLogger(__name__)
 
 class ChengyuBot:
     def __init__(self):
+        """Inicializar el bot con manejo robusto de archivos"""
+        self.df = pd.DataFrame()
+        self.categorias = []
+        self.load_chengyus_data()
+    
+    def debug_file_system(self):
+        """Función de debug para verificar el sistema de archivos"""
         try:
-            # Intentar cargar el archivo Excel
-            self.df = pd.read_excel('tabla-chengyus-completa.xlsx')
-            print(f"Archivo Excel cargado exitosamente con {len(self.df)} chengyus")
+            current_dir = os.getcwd()
+            files_available = os.listdir('.')
+            excel_exists = os.path.exists('tabla-chengyus-completa.xlsx')
             
+            logger.info(f"📂 Directorio actual: {current_dir}")
+            logger.info(f"📁 Archivos disponibles: {files_available}")
+            logger.info(f"🔍 Existe Excel: {excel_exists}")
+            
+            if excel_exists:
+                file_size = os.path.getsize('tabla-chengyus-completa.xlsx')
+                logger.info(f"📊 Tamaño del archivo Excel: {file_size} bytes")
+            
+            # Verificar si existe versión CSV
+            csv_exists = os.path.exists('chengyus_data.csv')
+            logger.info(f"🔍 Existe CSV alternativo: {csv_exists}")
+            
+        except Exception as e:
+            logger.error(f"Error en debug del sistema de archivos: {e}")
+    
+    def load_chengyus_data(self):
+        """Cargar datos de chengyus con múltiples estrategias de fallback"""
+        # Debug del sistema de archivos
+        self.debug_file_system()
+        
+        # Estrategia 1: Intentar cargar Excel principal
+        if self.try_load_excel():
+            return
+        
+        # Estrategia 2: Intentar cargar CSV alternativo
+        if self.try_load_csv():
+            return
+        
+        # Estrategia 3: Usar datos embebidos como último recurso
+        self.load_embedded_data()
+    
+    def try_load_excel(self):
+        """Intentar cargar archivo Excel con diferentes métodos"""
+        try:
+            if not os.path.exists('tabla-chengyus-completa.xlsx'):
+                logger.warning("❌ Archivo Excel no encontrado")
+                return False
+            
+            # Intentar con diferentes engines y hojas
+            engines = ['openpyxl', 'xlrd']
+            sheet_names = [0, 'tabla_chengyus_completa_con_ref', 'Sheet1']
+            
+            for engine in engines:
+                for sheet in sheet_names:
+                    try:
+                        self.df = pd.read_excel('tabla-chengyus-completa.xlsx', 
+                                              engine=engine, sheet_name=sheet)
+                        if not self.df.empty:
+                            logger.info(f"✅ Excel cargado con engine {engine}, hoja {sheet}: {len(self.df)} filas")
+                            self.process_loaded_data()
+                            return True
+                    except Exception as sheet_error:
+                        logger.warning(f"Error con engine {engine}, hoja {sheet}: {sheet_error}")
+                        continue
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error general al cargar Excel: {e}")
+            return False
+    
+    def try_load_csv(self):
+        """Intentar cargar archivo CSV alternativo"""
+        try:
+            if os.path.exists('chengyus_data.csv'):
+                self.df = pd.read_csv('chengyus_data.csv', encoding='utf-8')
+                logger.info(f"✅ CSV cargado: {len(self.df)} filas")
+                self.process_loaded_data()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error al cargar CSV: {e}")
+            return False
+    
+    def load_embedded_data(self):
+        """Cargar datos embebidos como último recurso"""
+        logger.warning("🔄 Usando datos embebidos como fallback")
+        
+        embedded_data = [
+            {
+                'Dia del año': 1,
+                'Chengyu 成语': '莫名其妙',
+                'Pinyin': 'mo ming qi miao',
+                'Traduccion Literal': 'sin nombre su misterio',
+                'Significado Figurativo': 'algo inexplicable sin razón aparente',
+                'Equivalente en Venezolano': '¡Esto no tiene nombre!',
+                'Categoria': 'Confusión y Misterio',
+                'Nivel de Dificultad': 'HSK6'
+            },
+            {
+                'Dia del año': 2,
+                'Chengyu 成语': '一举两得',
+                'Pinyin': 'yi ju liang de',
+                'Traduccion Literal': 'una acción dos ganancias',
+                'Significado Figurativo': 'lograr dos objetivos con una sola acción',
+                'Equivalente en Venezolano': 'Matar dos pájaros de un solo tiro',
+                'Categoria': 'Eficiencia y Logro',
+                'Nivel de Dificultad': 'HSK6'
+            },
+            {
+                'Dia del año': 3,
+                'Chengyu 成语': '火上加油',
+                'Pinyin': 'huo shang jia you',
+                'Traduccion Literal': 'añadir aceite al fuego',
+                'Significado Figurativo': 'empeorar una situación',
+                'Equivalente en Venezolano': 'Echar leña al fuego',
+                'Categoria': 'Conflictos y Problemas',
+                'Nivel de Dificultad': 'HSK7'
+            },
+            {
+                'Dia del año': 4,
+                'Chengyu 成语': '入乡随俗',
+                'Pinyin': 'ru xiang sui su',
+                'Traduccion Literal': 'entrar al pueblo seguir costumbres',
+                'Significado Figurativo': 'adaptarse a las costumbres locales',
+                'Equivalente en Venezolano': 'Donde fueres, haz lo que vieres',
+                'Categoria': 'Adaptación Cultural',
+                'Nivel de Dificultad': 'HSK7'
+            },
+            {
+                'Dia del año': 5,
+                'Chengyu 成语': '班门弄斧',
+                'Pinyin': 'ban men nong fu',
+                'Traduccion Literal': 'mostrar hacha ante Lu Ban',
+                'Significado Figurativo': 'mostrar habilidad ante un experto',
+                'Equivalente en Venezolano': 'Cachicamo diciéndole a morrocoy conchudo',
+                'Categoria': 'Humildad y Presunción',
+                'Nivel de Dificultad': 'HSK8'
+            }
+        ]
+        
+        self.df = pd.DataFrame(embedded_data)
+        self.process_loaded_data()
+        logger.info(f"✅ Datos embebidos cargados: {len(self.df)} chengyus")
+    
+    def process_loaded_data(self):
+        """Procesar datos cargados y extraer categorías"""
+        try:
             # Verificar columnas necesarias
             required_columns = ['Chengyu 成语', 'Pinyin', 'Traduccion Literal', 
                               'Significado Figurativo', 'Equivalente en Venezolano', 
                               'Categoria', 'Nivel de Dificultad']
             
-            for col in required_columns:
-                if col not in self.df.columns:
-                    print(f"Advertencia: Columna '{col}' no encontrada")
+            missing_columns = [col for col in required_columns if col not in self.df.columns]
+            if missing_columns:
+                logger.warning(f"⚠️ Columnas faltantes: {missing_columns}")
             
-            # Obtener categorías únicas
-            self.categorias = self.df['Categoria'].dropna().unique().tolist() if 'Categoria' in self.df.columns else []
+            # Extraer categorías únicas
+            if 'Categoria' in self.df.columns:
+                self.categorias = self.df['Categoria'].dropna().unique().tolist()
+                logger.info(f"📚 Categorías encontradas: {len(self.categorias)}")
+            else:
+                self.categorias = []
+                logger.warning("⚠️ No se encontró columna 'Categoria'")
             
-        except FileNotFoundError:
-            print("Error: No se encontró el archivo tabla-chengyus-completa.xlsx")
-            self.df = pd.DataFrame()
-            self.categorias = []
+            # Mostrar información de columnas disponibles
+            logger.info(f"📋 Columnas disponibles: {list(self.df.columns)}")
+            
         except Exception as e:
-            print(f"Error al cargar el archivo: {e}")
-            self.df = pd.DataFrame()
-            self.categorias = []
+            logger.error(f"Error al procesar datos: {e}")
     
     def format_chengyu(self, row):
-        """Formatear mensaje de chengyu con emojis"""
+        """Formatear mensaje de chengyu con manejo robusto de errores"""
         try:
-            chengyu = row.get('Chengyu 成语', 'N/A')
-            pinyin = row.get('Pinyin', 'N/A')
-            literal = row.get('Traduccion Literal', 'N/A')
-            significado = row.get('Significado Figurativo', 'N/A')
-            venezolano = row.get('Equivalente en Venezolano', 'N/A')
-            categoria = row.get('Categoria', 'N/A')
-            nivel = row.get('Nivel de Dificultad', 'N/A')
+            chengyu = str(row.get('Chengyu 成语', 'N/A'))
+            pinyin = str(row.get('Pinyin', 'N/A'))
+            literal = str(row.get('Traduccion Literal', 'N/A'))
+            significado = str(row.get('Significado Figurativo', 'N/A'))
+            venezolano = str(row.get('Equivalente en Venezolano', 'N/A'))
+            categoria = str(row.get('Categoria', 'N/A'))
+            nivel = str(row.get('Nivel de Dificultad', 'N/A'))
             
             return f"""
 🎋 *{chengyu}* ({pinyin})
@@ -64,15 +211,22 @@ class ChengyuBot:
 🏮 *Nivel HSK:* {nivel}
             """
         except Exception as e:
-            print(f"Error al formatear chengyu: {e}")
-            return "Error al mostrar el chengyu. Intenta de nuevo."
+            logger.error(f"Error al formatear chengyu: {e}")
+            return "❌ Error al mostrar el chengyu. Datos no disponibles."
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /start"""
-        welcome_msg = """
+        """Comando /start con información de diagnóstico"""
+        data_status = f"✅ {len(self.df)} chengyus" if not self.df.empty else "❌ Sin datos"
+        cat_status = f"✅ {len(self.categorias)} categorías" if self.categorias else "❌ Sin categorías"
+        
+        welcome_msg = f"""
 🇨🇳 *Bot de Chengyus Chino-Venezolanos* 🇻🇪
 
 ¡Aprende expresiones idiomáticas chinas con sus equivalentes en refranes venezolanos!
+
+📊 *Estado de datos:*
+• Chengyus: {data_status}
+• Categorías: {cat_status}
 
 *Comandos disponibles:*
 /chengyu - Obtén un chengyu aleatorio
@@ -80,34 +234,55 @@ class ChengyuBot:
 /categorias - Explora por categorías
 /quiz - Test interactivo
 /hsk [nivel] - Filtra por nivel HSK
+/debug - Información de sistema
 /ayuda - Muestra esta ayuda
 
 ¡Empieza tu aprendizaje cultural ahora!
         """
         await update.message.reply_text(welcome_msg, parse_mode='Markdown')
 
+    async def debug_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /debug para información del sistema"""
+        debug_info = f"""
+🔧 *Información de Debug:*
+
+📊 *Datos cargados:*
+• Chengyus: {len(self.df)}
+• Categorías: {len(self.categorias)}
+• Columnas: {len(self.df.columns) if not self.df.empty else 0}
+
+📁 *Sistema de archivos:*
+• Excel existe: {os.path.exists('tabla-chengyus-completa.xlsx')}
+• CSV existe: {os.path.exists('chengyus_data.csv')}
+• Directorio: {os.getcwd()}
+
+📋 *Columnas disponibles:*
+{list(self.df.columns) if not self.df.empty else 'Sin columnas'}
+        """
+        await update.message.reply_text(debug_info, parse_mode='Markdown')
+
     async def random_chengyu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /chengyu - Mostrar chengyu aleatorio"""
+        """Comando /chengyu con mejor manejo de errores"""
         if self.df.empty:
-            await update.message.reply_text("❌ No hay chengyus disponibles")
+            await update.message.reply_text("❌ No hay chengyus disponibles. Usa /debug para más información.")
             return
             
         try:
             chengyu = self.df.sample(1).iloc[0]
             await update.message.reply_text(self.format_chengyu(chengyu), parse_mode='Markdown')
         except Exception as e:
-            print(f"Error en random_chengyu: {e}")
-            await update.message.reply_text("❌ Error al obtener chengyu aleatorio")
+            logger.error(f"Error en random_chengyu: {e}")
+            await update.message.reply_text(f"❌ Error al obtener chengyu aleatorio: {str(e)}")
 
     async def daily_chengyu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /dia [numero] - Chengyu por día"""
+        """Comando /dia con validación mejorada"""
         if self.df.empty:
-            await update.message.reply_text("❌ No hay chengyus disponibles")
+            await update.message.reply_text("❌ No hay chengyus disponibles. Usa /debug para más información.")
             return
             
         try:
             if not context.args:
-                await update.message.reply_text("❌ Uso correcto: /dia [número entre 1-50]")
+                await update.message.reply_text(f"❌ Uso correcto: /dia [número entre 1-{len(self.df)}]")
                 return
                 
             day = int(context.args[0])
@@ -116,16 +291,16 @@ class ChengyuBot:
                 await update.message.reply_text(self.format_chengyu(chengyu), parse_mode='Markdown')
             else:
                 await update.message.reply_text(f"⚠️ El día debe estar entre 1 y {len(self.df)}")
-        except (ValueError, IndexError):
-            await update.message.reply_text("❌ Uso correcto: /dia [número entre 1-50]")
+        except (ValueError, IndexError) as e:
+            await update.message.reply_text(f"❌ Uso correcto: /dia [número entre 1-{len(self.df)}]")
         except Exception as e:
-            print(f"Error en daily_chengyu: {e}")
-            await update.message.reply_text("❌ Error al obtener chengyu del día")
+            logger.error(f"Error en daily_chengyu: {e}")
+            await update.message.reply_text(f"❌ Error al obtener chengyu del día: {str(e)}")
 
     async def show_categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /categorias - Mostrar categorías"""
+        """Comando /categorias con validación"""
         if not self.categorias:
-            await update.message.reply_text("❌ No hay categorías disponibles")
+            await update.message.reply_text("❌ No hay categorías disponibles. Usa /debug para más información.")
             return
             
         try:
@@ -135,16 +310,16 @@ class ChengyuBot:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(
-                "📚 *Categorías disponibles:*\nElije una categoría:",
+                f"📚 *Categorías disponibles ({len(self.categorias)}):*\nElije una categoría:",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
         except Exception as e:
-            print(f"Error en show_categories: {e}")
-            await update.message.reply_text("❌ Error al mostrar categorías")
+            logger.error(f"Error en show_categories: {e}")
+            await update.message.reply_text(f"❌ Error al mostrar categorías: {str(e)}")
 
     async def category_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manejador de selección de categoría"""
+        """Manejador de selección de categoría mejorado"""
         query = update.callback_query
         await query.answer()
         
@@ -161,17 +336,17 @@ class ChengyuBot:
                         parse_mode='Markdown'
                     )
                 else:
-                    await query.edit_message_text("❌ No hay chengyus en esta categoría")
+                    await query.edit_message_text(f"❌ No hay chengyus en la categoría '{category}'")
             else:
                 await query.edit_message_text("❌ Categoría no válida")
         except Exception as e:
-            print(f"Error en category_handler: {e}")
-            await query.edit_message_text("❌ Error al procesar categoría")
+            logger.error(f"Error en category_handler: {e}")
+            await query.edit_message_text(f"❌ Error al procesar categoría: {str(e)}")
 
     async def hsk_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /hsk [nivel] - Filtrar por nivel HSK"""
+        """Comando /hsk con mejor validación"""
         if self.df.empty:
-            await update.message.reply_text("❌ No hay chengyus disponibles")
+            await update.message.reply_text("❌ No hay chengyus disponibles. Usa /debug para más información.")
             return
             
         try:
@@ -195,13 +370,17 @@ class ChengyuBot:
             else:
                 await update.message.reply_text("❌ Niveles válidos: HSK6, HSK7, HSK8, HSK9")
         except Exception as e:
-            print(f"Error en hsk_filter: {e}")
-            await update.message.reply_text("❌ Error al filtrar por nivel HSK")
+            logger.error(f"Error en hsk_filter: {e}")
+            await update.message.reply_text(f"❌ Error al filtrar por nivel HSK: {str(e)}")
 
     async def quiz(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /quiz - Quiz interactivo"""
-        if self.df.empty or len(self.df) < 4:
-            await update.message.reply_text("❌ No hay suficientes chengyus para el quiz")
+        """Comando /quiz con validación robusta"""
+        if self.df.empty:
+            await update.message.reply_text("❌ No hay chengyus disponibles para el quiz. Usa /debug para más información.")
+            return
+            
+        if len(self.df) < 4:
+            await update.message.reply_text("❌ Se necesitan al menos 4 chengyus para el quiz.")
             return
             
         try:
@@ -209,105 +388,4 @@ class ChengyuBot:
             correct = self.df.sample(1).iloc[0]
             
             # Seleccionar 3 opciones incorrectas
-            wrong_options = self.df[self.df.index != correct.name].sample(3)
-            
-            # Mezclar opciones
-            all_options = [correct] + wrong_options.to_dict('records')
-            random.shuffle(all_options)
-            
-            # Crear teclado
-            keyboard = []
-            for i, opt in enumerate(all_options):
-                venezolano = opt.get('Equivalente en Venezolano', 'N/A')
-                keyboard.append([InlineKeyboardButton(
-                    venezolano[:50] + "..." if len(venezolano) > 50 else venezolano,
-                    callback_data=f"ans_{i}_{correct.name}"
-                )])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            chengyu = correct.get('Chengyu 成语', 'N/A')
-            pinyin = correct.get('Pinyin', 'N/A')
-            
-            await update.message.reply_text(
-                f"❓ *Quiz:* ¿Cuál es el equivalente venezolano de:\n\n*{chengyu}* ({pinyin})?",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            print(f"Error en quiz: {e}")
-            await update.message.reply_text("❌ Error al crear quiz")
-
-    async def answer_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manejador de respuestas del quiz"""
-        query = update.callback_query
-        await query.answer()
-        
-        try:
-            _, selected_idx, correct_idx = query.data.split('_')
-            correct_row = self.df.loc[int(correct_idx)]
-            
-            if selected_idx == "0":  # Primera opción (correcta por diseño)
-                msg = "✅ ¡Correcto! "
-            else:
-                msg = "❌ Incorrecto. "
-                
-            msg += f"La respuesta correcta es:\n{self.format_chengyu(correct_row)}"
-            await query.edit_message_text(msg, parse_mode='Markdown')
-        except Exception as e:
-            print(f"Error en answer_handler: {e}")
-            await query.edit_message_text("❌ Error al procesar respuesta")
-
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /ayuda"""
-        help_text = """
-🇨🇳 *Ayuda - Bot de Chengyus* 🇻🇪
-
-*Comandos disponibles:*
-/start - Mensaje de bienvenida
-/chengyu - Chengyu aleatorio
-/dia [1-50] - Chengyu específico
-/categorias - Explorar por categorías
-/hsk [HSK6/HSK7/HSK8/HSK9] - Filtrar por nivel
-/quiz - Quiz interactivo
-/ayuda - Esta ayuda
-
-*Ejemplos de uso:*
-`/dia 15` - Muestra el chengyu del día 15
-`/hsk HSK7` - Muestra chengyus de nivel HSK7
-
-¡Aprende expresiones chinas con sabiduría venezolana!
-        """
-        await update.message.reply_text(help_text, parse_mode='Markdown')
-
-def main():
-    """Función principal"""
-    # Obtener token de variable de entorno
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        print("Error: BOT_TOKEN no encontrado en variables de entorno")
-        return
-    
-    # Crear aplicación
-    application = Application.builder().token(token).build()
-    bot = ChengyuBot()
-    
-    # Agregar handlers
-    application.add_handler(CommandHandler('start', bot.start))
-    application.add_handler(CommandHandler('chengyu', bot.random_chengyu))
-    application.add_handler(CommandHandler('dia', bot.daily_chengyu))
-    application.add_handler(CommandHandler('categorias', bot.show_categories))
-    application.add_handler(CommandHandler('hsk', bot.hsk_filter))
-    application.add_handler(CommandHandler('quiz', bot.quiz))
-    application.add_handler(CommandHandler('ayuda', bot.help_command))
-    
-    # Handlers para botones
-    application.add_handler(CallbackQueryHandler(bot.category_handler, pattern=r"^cat_"))
-    application.add_handler(CallbackQueryHandler(bot.answer_handler, pattern=r"^ans_"))
-    
-    print("Bot iniciado. Presiona Ctrl+C para detener.")
-    
-    # Ejecutar bot
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+            wrong_options = self.df
