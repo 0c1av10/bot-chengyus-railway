@@ -279,6 +279,36 @@ class ChengyuBot:
                 'Categoria': 'Eficiencia y Logro',
                 'Nivel de Dificultad': 'HSK6',
                 'Frase de Ejemplo': '学习中文既能提高语言能力，又能了解文化，真是一举两得。'
+            },
+            {
+                'Chengyu 成语': '火上加油',
+                'Pinyin': 'huo shang jia you',
+                'Traduccion Literal': 'añadir aceite al fuego',
+                'Significado Figurativo': 'empeorar una situación',
+                'Equivalente en Venezolano': 'Echar leña al fuego',
+                'Categoria': 'Conflictos',
+                'Nivel de Dificultad': 'HSK7',
+                'Frase de Ejemplo': '他本来就很生气，你这样说话是火上加油。'
+            },
+            {
+                'Chengyu 成语': '入乡随俗',
+                'Pinyin': 'ru xiang sui su',
+                'Traduccion Literal': 'entrar pueblo seguir costumbres',
+                'Significado Figurativo': 'adaptarse a las costumbres locales',
+                'Equivalente en Venezolano': 'Donde fueres, haz lo que vieres',
+                'Categoria': 'Adaptación',
+                'Nivel de Dificultad': 'HSK7',
+                'Frase de Ejemplo': '到了外国要入乡随俗，尊重当地的文化。'
+            },
+            {
+                'Chengyu 成语': '班门弄斧',
+                'Pinyin': 'ban men nong fu',
+                'Traduccion Literal': 'mostrar hacha ante Lu Ban',
+                'Significado Figurativo': 'mostrar habilidad ante un experto',
+                'Equivalente en Venezolano': 'Cachicamo diciéndole a morrocoy conchudo',
+                'Categoria': 'Humildad',
+                'Nivel de Dificultad': 'HSK8',
+                'Frase de Ejemplo': '在专家面前展示技术，这不是班门弄斧吗？'
             }
         ]
         
@@ -295,7 +325,6 @@ class ChengyuBot:
 ¡Aprende expresiones idiomáticas chinas con sus equivalentes en refranes venezolanos!
 
 📊 *Disponibles:* {total_chengyus} chengyus
-📂 *Fuente:* {self.data_source}
 
 *Comandos disponibles:*
 /chengyu - Obtén un chengyu aleatorio
@@ -309,27 +338,256 @@ class ChengyuBot:
         """
         await update.message.reply_text(welcome_msg, parse_mode='Markdown')
     
-    # [Resto de métodos del bot sin cambios: random_chengyu, daily_chengyu, etc.]
+    async def random_chengyu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /chengyu - Mostrar chengyu aleatorio"""
+        if self.df.empty:
+            await update.message.reply_text("❌ Servicio temporalmente no disponible. Intenta más tarde.")
+            return
+            
+        try:
+            chengyu = self.df.sample(1).iloc[0]
+            await update.message.reply_text(self.format_chengyu(chengyu), parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error en random_chengyu: {e}")
+            await update.message.reply_text("❌ Error al obtener chengyu. Intenta de nuevo.")
+
+    async def daily_chengyu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /dia [numero] - Chengyu específico por día"""
+        if self.df.empty:
+            await update.message.reply_text("❌ Servicio temporalmente no disponible. Intenta más tarde.")
+            return
+            
+        try:
+            if not context.args:
+                await update.message.reply_text(f"❌ Uso correcto: /dia [número entre 1-{len(self.df)}]")
+                return
+                
+            day = int(context.args[0])
+            if 1 <= day <= len(self.df):
+                chengyu = self.df.iloc[day-1]
+                await update.message.reply_text(self.format_chengyu(chengyu), parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"⚠️ El día debe estar entre 1 y {len(self.df)}")
+        except (ValueError, IndexError):
+            await update.message.reply_text(f"❌ Uso correcto: /dia [número entre 1-{len(self.df)}]")
+        except Exception as e:
+            logger.error(f"Error en daily_chengyu: {e}")
+            await update.message.reply_text("❌ Error al obtener chengyu del día.")
+
+    async def show_categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /categorias - Mostrar categorías disponibles"""
+        if not self.categorias:
+            await update.message.reply_text("❌ No hay categorías disponibles en este momento.")
+            return
+            
+        try:
+            keyboard = []
+            for i, cat in enumerate(self.categorias[:20]):  # Máximo 20 categorías
+                keyboard.append([InlineKeyboardButton(cat, callback_data=f"cat_{i}")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                f"📚 *Categorías disponibles:*\nElije una categoría para explorar:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error en show_categories: {e}")
+            await update.message.reply_text("❌ Error al mostrar categorías.")
+
+    async def category_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Manejador de selección de categoría"""
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            category_index = int(query.data.split('_')[1])
+            if category_index < len(self.categorias):
+                category = self.categorias[category_index]
+                filtered = self.df[self.df['Categoria'] == category]
+                
+                if not filtered.empty:
+                    chengyu = filtered.sample(1).iloc[0]
+                    await query.edit_message_text(
+                        f"📖 *Categoría: {category}*\n{self.format_chengyu(chengyu)}",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await query.edit_message_text("❌ No hay chengyus disponibles en esta categoría.")
+            else:
+                await query.edit_message_text("❌ Categoría no válida.")
+        except Exception as e:
+            logger.error(f"Error en category_handler: {e}")
+            await query.edit_message_text("❌ Error al procesar categoría.")
+
+    async def hsk_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /hsk [nivel] - Filtrar por nivel HSK"""
+        if self.df.empty:
+            await update.message.reply_text("❌ Servicio temporalmente no disponible. Intenta más tarde.")
+            return
+            
+        try:
+            if not context.args:
+                await update.message.reply_text("ℹ️ Niveles disponibles: HSK6, HSK7, HSK8, HSK9\nEjemplo: /hsk HSK7")
+                return
+                
+            level = context.args[0].upper()
+            valid_levels = ['HSK6', 'HSK7', 'HSK8', 'HSK9']
+            
+            if level in valid_levels:
+                filtered = self.df[self.df['Nivel de Dificultad'] == level]
+                if not filtered.empty:
+                    chengyu = filtered.sample(1).iloc[0]
+                    await update.message.reply_text(
+                        f"🎓 *Nivel {level}*\n{self.format_chengyu(chengyu)}",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(f"❌ No hay chengyus disponibles de nivel {level}.")
+            else:
+                await update.message.reply_text("❌ Niveles válidos: HSK6, HSK7, HSK8, HSK9")
+        except Exception as e:
+            logger.error(f"Error en hsk_filter: {e}")
+            await update.message.reply_text("❌ Error al filtrar por nivel HSK.")
+
+    async def quiz(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /quiz - Quiz interactivo"""
+        if self.df.empty or len(self.df) < 4:
+            await update.message.reply_text("❌ Quiz temporalmente no disponible. Intenta más tarde.")
+            return
+            
+        try:
+            # Seleccionar chengyu correcto
+            correct = self.df.sample(1).iloc[0]
+            
+            # Seleccionar 3 opciones incorrectas
+            wrong_options = self.df[self.df.index != correct.name].sample(3)
+            
+            # Crear opciones mezcladas
+            all_options = [correct] + wrong_options.to_dict('records')
+            random.shuffle(all_options)
+            
+            # Encontrar índice correcto
+            correct_index = None
+            for i, opt in enumerate(all_options):
+                if opt.get('Chengyu 成语') == correct.get('Chengyu 成语'):
+                    correct_index = i
+                    break
+            
+            # Crear teclado
+            keyboard = []
+            for i, opt in enumerate(all_options):
+                venezolano = self.get_column_value(opt, ['Equivalente en Venezolano', 'Equivalente', 'Refran'])
+                display_text = venezolano[:45] + "..." if len(venezolano) > 45 else venezolano
+                keyboard.append([InlineKeyboardButton(
+                    display_text,
+                    callback_data=f"ans_{i}_{correct_index}_{correct.name}"
+                )])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            chengyu = self.get_column_value(correct, ['Chengyu 成语', 'Chengyu'])
+            pinyin = self.get_column_value(correct, ['Pinyin', 'pinyin'])
+            
+            await update.message.reply_text(
+                f"❓ *Quiz:* ¿Cuál es el equivalente venezolano de:\n\n*{chengyu}* ({pinyin})?",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Error en quiz: {e}")
+            await update.message.reply_text("❌ Error al crear quiz.")
+
+    async def answer_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Manejador de respuestas del quiz"""
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            parts = query.data.split('_')
+            selected_idx = int(parts[1])
+            correct_idx = int(parts[2])
+            correct_row_idx = int(parts[3])
+            
+            correct_row = self.df.loc[correct_row_idx]
+            
+            if selected_idx == correct_idx:
+                msg = "✅ ¡Correcto! "
+            else:
+                msg = "❌ Incorrecto. "
+                
+            msg += f"La respuesta correcta es:\n{self.format_chengyu(correct_row)}"
+            await query.edit_message_text(msg, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error en answer_handler: {e}")
+            await query.edit_message_text("❌ Error al procesar respuesta.")
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Comando /ayuda - Información de ayuda"""
+        total_chengyus = len(self.df) if not self.df.empty else 0
+        
+        help_text = f"""
+🇨🇳 *Ayuda - Bot de Chengyus* 🇻🇪
+
+*Comandos disponibles:*
+/start - Mensaje de bienvenida
+/chengyu - Chengyu aleatorio con equivalente venezolano
+/dia [1-{total_chengyus}] - Chengyu específico por número de día
+/categorias - Explorar chengyus por categorías temáticas
+/hsk [HSK6/HSK7/HSK8/HSK9] - Filtrar por nivel de dificultad
+/quiz - Quiz interactivo de práctica
+/ayuda - Esta ayuda
+
+*Ejemplos de uso:*
+`/dia 15` - Muestra el chengyu del día 15
+`/hsk HSK7` - Muestra chengyus de nivel HSK7
+
+*¿Qué son los chengyus?*
+Los chengyus son expresiones idiomáticas chinas de 4 caracteres que contienen sabiduría popular y referencias culturales.
+
+¡Aprende expresiones chinas con sabiduría venezolana! 🎓
+        """
+        await update.message.reply_text(help_text, parse_mode='Markdown')
 
 def main():
     """Función principal"""
+    # Obtener token de variable de entorno
     token = os.getenv("BOT_TOKEN")
     if not token:
         logger.error("BOT_TOKEN no encontrado en variables de entorno")
+        print("Error: Configura BOT_TOKEN en las variables de entorno")
         return
     
+    logger.info("Iniciando bot de chengyus...")
+    
     try:
+        # Crear aplicación
         application = Application.builder().token(token).build()
         bot = ChengyuBot()
         
-        # Agregar handlers
+        # Agregar handlers de comandos
         application.add_handler(CommandHandler('start', bot.start))
-        # [Agregar resto de handlers...]
+        application.add_handler(CommandHandler('chengyu', bot.random_chengyu))
+        application.add_handler(CommandHandler('dia', bot.daily_chengyu))
+        application.add_handler(CommandHandler('categorias', bot.show_categories))
+        application.add_handler(CommandHandler('hsk', bot.hsk_filter))
+        application.add_handler(CommandHandler('quiz', bot.quiz))
+        application.add_handler(CommandHandler('ayuda', bot.help_command))
         
+        # Handlers para botones interactivos
+        application.add_handler(CallbackQueryHandler(bot.category_handler, pattern=r"^cat_"))
+        application.add_handler(CallbackQueryHandler(bot.answer_handler, pattern=r"^ans_"))
+        
+        logger.info("Bot configurado exitosamente")
+        print("✅ Bot iniciado correctamente")
+        
+        # Ejecutar bot en modo polling
         application.run_polling()
         
     except Exception as e:
         logger.error(f"Error al iniciar bot: {e}")
+        print(f"Error al iniciar bot: {e}")
 
 if __name__ == '__main__':
     main()
+
+
