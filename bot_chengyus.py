@@ -437,50 +437,99 @@ class ChengyuBot:
                 await update.message.reply_text("ℹ️ Niveles disponibles: HSK6, HSK7, HSK8, HSK9\nEjemplo: /hsk HSK7")
                 return
                 
-            level = context.args[0].upper()
+            level_input = context.args[0].upper()
             valid_levels = ['HSK6', 'HSK7', 'HSK8', 'HSK9']
             
-            if level in valid_levels:
-                # Filtrar por nivel usando diferentes nombres posibles de columna
-                nivel_cols = ['Nivel de Dificultad', 'Nivel', 'HSK']
-                filtered = pd.DataFrame()
-                
-                for col in nivel_cols:
-                    if col in self.df.columns:
-                        filtered = self.df[self.df[col].str.upper() == level]
-                        if not filtered.empty:
-                            break
-                
-                if not filtered.empty:
-                    # Ordenar por día del año si existe la columna
-                    if 'Dia del año' in filtered.columns:
-                        filtered = filtered.sort_values('Dia del año')
-                    
-                    # Construir mensaje con todos los chengyus
-                    response = f"🎓 *Todos los Chengyus de Nivel {level}* 🏮\n\n"
-                    
-                    for _, row in filtered.iterrows():
-                        chengyu = self.get_column_value(row, ['Chengyu 成语', 'Chengyu'])
-                        response += f"• {chengyu}\n"
-                    
-                    # Añadir pie de página
-                    response += f"\nTotal: {len(filtered)} chengyus encontrados"
-                    
-                    # Enviar mensaje (Telegram limita a 4096 caracteres)
-                    if len(response) > 4096:
-                        # Si es muy largo, dividir en partes
-                        parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-                        for part in parts:
-                            await update.message.reply_text(part, parse_mode='Markdown')
-                    else:
-                        await update.message.reply_text(response, parse_mode='Markdown')
-                else:
-                    await update.message.reply_text(f"❌ No hay chengyus disponibles de nivel {level}.")
-            else:
+            # Normalizar entrada del usuario (quitar espacios)
+            level = level_input.replace(" ", "")
+            
+            if level not in valid_levels:
                 await update.message.reply_text("❌ Niveles válidos: HSK6, HSK7, HSK8, HSK9")
+                return
+            
+            # DEBUG: Log del nivel solicitado
+            logger.info(f"🔍 Nivel solicitado: {level} (entrada original: '{level_input}')")
+            
+            # Buscar la columna de nivel con más variaciones
+            nivel_cols = ['Nivel de Dificultad', 'Nivel de Dificulatad', 'Nivel', 'HSK', 'level', 'Level']
+            filtered = pd.DataFrame()
+            used_column = None
+            
+            # DEBUG: Mostrar todas las columnas disponibles
+            logger.info(f"📋 Columnas disponibles: {list(self.df.columns)}")
+            
+            for col in nivel_cols:
+                if col in self.df.columns:
+                    logger.info(f"🔍 Intentando filtrar con columna: {col}")
+                    
+                    # Mostrar valores únicos en esta columna para debugging
+                    unique_vals = self.df[col].dropna().astype(str).unique()
+                    logger.info(f"📊 Valores únicos en '{col}': {', '.join(unique_vals)}")
+                    
+                    # Crear una serie temporal normalizada (quitar espacios y convertir a mayúsculas)
+                    temp_series = self.df[col].astype(str).str.replace(' ', '').str.upper()
+                    
+                    # Filtrar usando la serie normalizada
+                    filtered = self.df[temp_series == level]
+                    
+                    if not filtered.empty:
+                        used_column = col
+                        logger.info(f"✅ Filtro exitoso en columna '{col}' con nivel '{level}'")
+                        break
+            
+            # DEBUG: Log del resultado del filtrado
+            logger.info(f"📊 Resultados encontrados: {len(filtered)} chengyus")
+            
+            if not filtered.empty:
+                # Ordenar por día del año si existe la columna
+                if 'Dia del año' in filtered.columns:
+                    filtered = filtered.sort_values('Dia del año')
+                
+                # Construir mensaje con todos los chengyus
+                response = f"🎓 *Todos los Chengyus de Nivel {level}* 🏮\n\n"
+                
+                for _, row in filtered.iterrows():
+                    chengyu = self.get_column_value(row, ['Chengyu 成语', 'Chengyu'])
+                    pinyin = self.get_column_value(row, ['Pinyin', 'pinyin'])
+                    nivel_val = self.get_column_value(row, ['Nivel de Dificultad', 'Nivel', 'HSK'])
+                    
+                    # Mostrar el valor real del nivel para referencia
+                    response += f"• {chengyu} ({pinyin}) - [{nivel_val}]\n"
+                
+                # Añadir pie de página
+                response += f"\n📊 Total: {len(filtered)} chengyus encontrados"
+                
+                # Enviar mensaje (Telegram limita a 4096 caracteres)
+                if len(response) > 4096:
+                    parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
+                    for part in parts:
+                        await update.message.reply_text(part, parse_mode='Markdown')
+                else:
+                    await update.message.reply_text(response, parse_mode='Markdown')
+            else:
+                # Mensaje de error detallado
+                error_msg = f"❌ No hay chengyus disponibles de nivel {level}.\n\n"
+                error_msg += "🔍 *Posibles causas:*\n"
+                error_msg += "- Los niveles en tus datos tienen formato diferente (ej: 'HSK 6' con espacio)\n"
+                error_msg += "- La columna de nivel tiene nombres diferentes\n"
+                error_msg += "- No existen chengyus para ese nivel\n\n"
+                
+                # Mostrar las columnas relacionadas con nivel que existen
+                nivel_cols_found = [col for col in self.df.columns if any(kw in col.lower() for kw in ['nivel', 'hsk', 'dificultad', 'level'])]
+                
+                if nivel_cols_found:
+                    error_msg += f"📋 Columnas de nivel encontradas: {', '.join(nivel_cols_found)}\n"
+                    
+                    # Mostrar valores únicos de la primera columna de nivel encontrada
+                    if nivel_cols_found:
+                        first_col = nivel_cols_found[0]
+                        unique_levels = self.df[first_col].dropna().astype(str).unique()
+                        error_msg += f"📊 Valores disponibles en '{first_col}': {', '.join(unique_levels)}"
+                
+                await update.message.reply_text(error_msg, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Error en hsk_filter: {e}")
-            await update.message.reply_text("❌ Error al filtrar por nivel HSK.")
+            await update.message.reply_text(f"❌ Error al filtrar por nivel HSK: {str(e)}")
 
     async def quiz(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Comando /quiz - Quiz interactivo"""
