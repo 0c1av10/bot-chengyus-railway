@@ -326,21 +326,18 @@ class ChengyuBot:
         logger.info(f"✅ Datos embebidos cargados: {len(self.df)} chengyus")
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /start optimizado para Excel"""
-        total_chengyus = len(self.df) if not self.df.empty else 0
-        
-        welcome_msg = f"""
+        """Comando /start limpio sin información técnica"""
+        welcome_msg = """
 🇨🇳 *Bot de Chengyus Chino-Venezolanos* 🇻🇪
 
 ¡Aprende expresiones idiomáticas chinas con sus equivalentes en refranes venezolanos!
 
-
 *Comandos disponibles:*
 /chengyu - Obtén un chengyu aleatorio
-/dia [1-{total_chengyus}] - Chengyu específico por día
+/dia [1-50] - Chengyu específico por día
 /categorias - Explora por categorías
 /quiz - Test interactivo de práctica
-/hsk [HSK6/HSK7/HSK8/HSK9] - Filtra por nivel
+/hsk [HSK6/HSK7/HSK8/HSK9] - Filtrar por nivel
 /ayuda - Muestra esta ayuda
 
 ¡Empieza tu aprendizaje cultural ahora! 🎓
@@ -396,7 +393,7 @@ class ChengyuBot:
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text(
-                f"📚 *Categorías disponibles ({len(self.categorias)}):*\nElije una categoría para explorar:",
+                f"📚 *Categorías disponibles:*\nElije una categoría para explorar:",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
@@ -430,7 +427,7 @@ class ChengyuBot:
             await query.edit_message_text("❌ Error al procesar categoría.")
 
     async def hsk_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /hsk [nivel] - Filtrar por nivel HSK"""
+        """Comando /hsk [nivel] - Mostrar TODOS los chengyus del nivel solicitado"""
         if self.df.empty:
             await update.message.reply_text("❌ Servicio temporalmente no disponible. Intenta más tarde.")
             return
@@ -444,13 +441,39 @@ class ChengyuBot:
             valid_levels = ['HSK6', 'HSK7', 'HSK8', 'HSK9']
             
             if level in valid_levels:
-                filtered = self.df[self.df['Nivel de Dificultad'] == level]
+                # Filtrar por nivel usando diferentes nombres posibles de columna
+                nivel_cols = ['Nivel de Dificultad', 'Nivel', 'HSK']
+                filtered = pd.DataFrame()
+                
+                for col in nivel_cols:
+                    if col in self.df.columns:
+                        filtered = self.df[self.df[col].str.upper() == level]
+                        if not filtered.empty:
+                            break
+                
                 if not filtered.empty:
-                    chengyu = filtered.sample(1).iloc[0]
-                    await update.message.reply_text(
-                        f"🎓 *Nivel {level}*\n{self.format_chengyu(chengyu)}",
-                        parse_mode='Markdown'
-                    )
+                    # Ordenar por día del año si existe la columna
+                    if 'Dia del año' in filtered.columns:
+                        filtered = filtered.sort_values('Dia del año')
+                    
+                    # Construir mensaje con todos los chengyus
+                    response = f"🎓 *Todos los Chengyus de Nivel {level}* 🏮\n\n"
+                    
+                    for _, row in filtered.iterrows():
+                        chengyu = self.get_column_value(row, ['Chengyu 成语', 'Chengyu'])
+                        response += f"• {chengyu}\n"
+                    
+                    # Añadir pie de página
+                    response += f"\nTotal: {len(filtered)} chengyus encontrados"
+                    
+                    # Enviar mensaje (Telegram limita a 4096 caracteres)
+                    if len(response) > 4096:
+                        # Si es muy largo, dividir en partes
+                        parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
+                        for part in parts:
+                            await update.message.reply_text(part, parse_mode='Markdown')
+                    else:
+                        await update.message.reply_text(response, parse_mode='Markdown')
                 else:
                     await update.message.reply_text(f"❌ No hay chengyus disponibles de nivel {level}.")
             else:
@@ -532,15 +555,13 @@ class ChengyuBot:
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Comando /ayuda"""
-        total_chengyus = len(self.df) if not self.df.empty else 0
-        
-        help_text = f"""
+        help_text = """
 🇨🇳 *Ayuda - Bot de Chengyus* 🇻🇪
 
 *Comandos disponibles:*
 /start - Mensaje de bienvenida
 /chengyu - Chengyu aleatorio con equivalente venezolano
-/dia [1-{total_chengyus}] - Chengyu específico por número
+/dia [1-50] - Chengyu específico por número
 /categorias - Explorar por categorías temáticas
 /hsk [HSK6/HSK7/HSK8/HSK9] - Filtrar por nivel
 /quiz - Quiz interactivo de práctica
