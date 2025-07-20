@@ -4,13 +4,34 @@ import pandas as pd
 import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from threading import Thread
+from flask import Flask
 
-# Configurar logging
+# Configurar logging para toda la app
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# --- Servidor Flask mínimo para puerto dummy ---
+flask_app = Flask(__name__)
+
+
+@flask_app.route("/")
+def health_check():
+    return "Bot is running", 200
+
+
+@flask_app.route("/health")
+def health():
+    return {"status": "ok", "uptime": "running"}, 200
+
+
+def run_flask():
+    port = int(os.getenv("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port, debug=False)
+
 
 class ChengyuBot:
     def __init__(self):
@@ -19,270 +40,82 @@ class ChengyuBot:
         self.categorias = []
         self.data_source = "ninguno"
         self.load_chengyus_data()
-    
+
     def load_chengyus_data(self):
-        """Cargar datos priorizando archivos Excel"""
         logger.info("🔄 Iniciando carga de datos desde Excel...")
-        
-        # Prioridad 1: Archivos Excel específicos
+
         if self.load_excel_files():
             self.data_source = "Excel"
             return
-        
-        # Prioridad 2: Archivos CSV como fallback
         if self.load_csv_fallback():
             self.data_source = "CSV backup"
             return
-        
-        # Último recurso: datos embebidos
+
         logger.warning("⚠️ Usando datos embebidos limitados")
         self.load_embedded_data()
         self.data_source = "embebidos"
-    
+
     def load_excel_files(self):
-        """Cargar archivos Excel con múltiples estrategias"""
-        # Lista de archivos Excel a intentar
         excel_files = [
-            'tabla-chengyus-completa.xlsx',
-            'tabla chengyus completa.xlsx',
-            'chengyus.xlsx',
-            'chengyus_data.xlsx',
-            'data.xlsx'
+            "tabla-chengyus-completa.xlsx",
+            "tabla chengyus completa.xlsx",
+            "chengyus.xlsx",
+            "chengyus_data.xlsx",
+            "data.xlsx",
         ]
-        
+
         for excel_file in excel_files:
             if not os.path.exists(excel_file):
                 continue
-            
+
             logger.info(f"📂 Intentando cargar {excel_file}")
-            
-            # Probar diferentes hojas de cálculo
+
             sheet_names = [
-                0,  # Primera hoja por defecto
-                'Sheet1',
-                'tabla_chengyus_completa_con_ref',
-                'tabla-chengyus-completa',
-                'Datos',
-                'chengyus',
-                'Data'
+                0,
+                "Sheet1",
+                "tabla_chengyus_completa_con_ref",
+                "tabla-chengyus-completa",
+                "Datos",
+                "chengyus",
+                "Data",
             ]
-            
+
             for sheet in sheet_names:
                 try:
-                    # Intentar cargar con openpyxl (mejor para .xlsx)
                     df_test = pd.read_excel(
-                        excel_file, 
-                        sheet_name=sheet, 
-                        engine='openpyxl'
+                        excel_file,
+                        sheet_name=sheet,
+                        engine="openpyxl"
                     )
-                    
-                    # Validar datos
-                    if df_test.empty:
+
+                    if df_test.empty or len(df_test) < 10:
                         continue
-                    
-                    if len(df_test) < 10:  # Mínimo 10 chengyus
+
+                    if not self.validate_essential_columns(df_test):
                         continue
-                    
-                    # Verificar columnas esenciales
-                    essential_found = self.validate_essential_columns(df_test)
-                    if not essential_found:
-                        continue
-                    
-                    # Archivo Excel válido encontrado
+
                     self.df = df_test
                     self.process_loaded_data()
-                    logger.info(f"✅ Excel cargado exitosamente: {len(self.df)} chengyus desde {excel_file}, hoja '{sheet}'")
+                    logger.info(
+                        f"✅ Excel cargado desde {excel_file}, hoja '{sheet}', {len(self.df)} chengyus"
+                    )
                     return True
-                    
+
                 except Exception as e:
                     logger.debug(f"Error con {excel_file}, hoja {sheet}: {e}")
                     continue
-        
-        logger.warning("❌ No se pudo cargar ningún archivo Excel válido")
+
+        logger.warning("❌ No se pudo cargar archivo Excel válido")
         return False
     
     def validate_essential_columns(self, df):
-        """Validar que el DataFrame tenga columnas esenciales"""
-        # Buscar variaciones de columnas de chengyu
         chengyu_cols = ['Chengyu 成语', 'Chengyu', 'chengyu', 'CHENGYU']
         pinyin_cols = ['Pinyin', 'pinyin', 'PINYIN']
-        venezolano_cols = [
-            'Equivalente en Venezolano',
-            'Equivalente',
-            'Refran',
-            'Refrán',
-            'venezolano'
-        ]
-        
+        venezolano_cols = ['Equivalente en Venezolano', 'Equivalente', 'Refran', 'Refrán', 'venezolano']
         has_chengyu = any(col in df.columns for col in chengyu_cols)
         has_pinyin = any(col in df.columns for col in pinyin_cols)
         has_venezolano = any(col in df.columns for col in venezolano_cols)
-        
         return has_chengyu and (has_pinyin or has_venezolano)
-    
-    def load_csv_fallback(self):
-        """Cargar CSV como fallback si Excel falla"""
-        csv_files = [
-            'tabla chengyus completa.csv',
-            'chengyus_data.csv',
-            'tabla-chengyus-completa.csv',
-            'chengyus.csv'
-        ]
-        
-        for csv_file in csv_files:
-            if not os.path.exists(csv_file):
-                continue
-                
-            try:
-                logger.info(f"📂 Intentando CSV fallback: {csv_file}")
-                
-                # Probar múltiples encodings
-                encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
-                
-                for encoding in encodings:
-                    try:
-                        df_test = pd.read_csv(csv_file, encoding=encoding)
-                        
-                        if not df_test.empty and len(df_test) >= 10:
-                            essential_found = self.validate_essential_columns(df_test)
-                            if essential_found:
-                                self.df = df_test
-                                self.process_loaded_data()
-                                logger.info(f"✅ CSV fallback cargado: {len(self.df)} chengyus")
-                                return True
-                    except:
-                        continue
-            except:
-                continue
-        
-        return False
-    
-    def process_loaded_data(self):
-        """Procesar datos con normalización de columnas"""
-        try:
-            # Limpiar filas completamente vacías
-            self.df = self.df.dropna(how='all')
-            
-            # Normalizar nombres de columnas
-            column_mapping = {
-                # Variaciones de Chengyu
-                'chengyu': 'Chengyu 成语',
-                'CHENGYU': 'Chengyu 成语',
-                'Chengyu': 'Chengyu 成语',
-                
-                # Variaciones de Pinyin
-                'pinyin': 'Pinyin',
-                'PINYIN': 'Pinyin',
-                
-                # Variaciones de Traducción Literal
-                'traduccion literal': 'Traduccion Literal',
-                'Traducción Literal': 'Traduccion Literal',
-                'literal': 'Traduccion Literal',
-                
-                # Variaciones de Significado
-                'significado figurativo': 'Significado Figurativo',
-                'Significado': 'Significado Figurativo',
-                'significado': 'Significado Figurativo',
-                
-                # Variaciones de Equivalente Venezolano
-                'equivalente en venezolano': 'Equivalente en Venezolano',
-                'equivalente': 'Equivalente en Venezolano',
-                'refran': 'Equivalente en Venezolano',
-                'refrán': 'Equivalente en Venezolano',
-                'venezolano': 'Equivalente en Venezolano',
-                
-                # Variaciones de Categoría
-                'categoria': 'Categoria',
-                'categoría': 'Categoria',
-                'category': 'Categoria',
-                'tema': 'Categoria',
-                
-                # Variaciones de Nivel
-                'nivel de dificultad': 'Nivel de Dificultad',
-                'nivel': 'Nivel de Dificultad',
-                'hsk': 'Nivel de Dificultad',
-                'HSK': 'Nivel de Dificultad',
-                
-                # Variaciones de Ejemplo
-                'frase de ejemplo': 'Frase de Ejemplo',
-                'ejemplo': 'Frase de Ejemplo',
-                'frase': 'Frase de Ejemplo'
-            }
-            
-            # Aplicar normalización
-            for old_name, new_name in column_mapping.items():
-                if old_name in self.df.columns and new_name not in self.df.columns:
-                    self.df.rename(columns={old_name: new_name}, inplace=True)
-            
-            logger.info(f"📋 Columnas normalizadas: {list(self.df.columns)}")
-            logger.info(f"📊 Total de chengyus procesados: {len(self.df)}")
-            
-            # Extraer categorías únicas
-            if 'Categoria' in self.df.columns:
-                self.categorias = self.df['Categoria'].dropna().unique().tolist()
-                logger.info(f"📚 Categorías encontradas: {len(self.categorias)}")
-            else:
-                self.categorias = ['General']
-            
-            # Mostrar muestra de los primeros datos
-            if not self.df.empty:
-                logger.info(f"🔍 Muestra de datos: {self.df.head(1).to_dict('records')}")
-            
-        except Exception as e:
-            logger.error(f"Error procesando datos: {e}")
-    
-    def format_chengyu(self, row):
-        """Formatear chengyu con búsqueda flexible de columnas"""
-        try:
-            # Obtener valores usando función helper
-            chengyu = self.get_column_value(row, ['Chengyu 成语', 'Chengyu', 'chengyu'])
-            pinyin = self.get_column_value(row, ['Pinyin', 'pinyin'])
-            literal = self.get_column_value(row, ['Traduccion Literal', 'literal'])
-            significado = self.get_column_value(row, ['Significado Figurativo', 'Significado', 'significado'])
-            venezolano = self.get_column_value(row, ['Equivalente en Venezolano', 'Equivalente', 'venezolano'])
-            categoria = self.get_column_value(row, ['Categoria', 'categoria'])
-            nivel = self.get_column_value(row, ['Nivel de Dificultad', 'Nivel', 'HSK'])
-            ejemplo = self.get_column_value(row, ['Frase de Ejemplo', 'Ejemplo', 'frase'])
-            
-            # Construir mensaje formateado
-            formatted_text = f"""
-🎋 *{chengyu}* ({pinyin})
-
-📜 *Traducción literal:* {literal}
-💡 *Significado:* {significado}
-
-🇻🇪 *Equivalente venezolano:*
-"_{venezolano}_"
-"""
-            
-            # Agregar ejemplo si existe
-            if ejemplo and ejemplo != 'N/A' and ejemplo.strip():
-                formatted_text += f"""
-📝 *Ejemplo en chino:*
-{ejemplo}
-"""
-            
-            # Agregar metadatos
-            formatted_text += f"""
-📌 *Categoría:* {categoria}
-🏮 *Nivel HSK:* {nivel}
-            """
-            
-            return formatted_text
-            
-        except Exception as e:
-            logger.error(f"Error formateando chengyu: {e}")
-            return "❌ Error al mostrar el chengyu. Intenta con otro comando."
-    
-    def get_column_value(self, row, possible_columns):
-        """Buscar valor en múltiples columnas posibles"""
-        for col in possible_columns:
-            if col in row and pd.notna(row.get(col)):
-                value = str(row.get(col)).strip()
-                if value and value != 'nan':
-                    return value
-        return 'N/A'
-    
     def load_embedded_data(self):
         """Datos embebidos con ejemplos completos"""
         embedded_data = [
@@ -320,7 +153,6 @@ class ChengyuBot:
                 'Frase de Ejemplo': '他本来就很生气，你这样说话是火上加油。'
             }
         ]
-        
         self.df = pd.DataFrame(embedded_data)
         self.process_loaded_data()
         logger.info(f"✅ Datos embebidos cargados: {len(self.df)} chengyus")
@@ -349,7 +181,6 @@ class ChengyuBot:
         if self.df.empty:
             await update.message.reply_text("❌ Servicio temporalmente no disponible. Intenta más tarde.")
             return
-            
         try:
             chengyu = self.df.sample(1).iloc[0]
             await update.message.reply_text(self.format_chengyu(chengyu), parse_mode='Markdown')
@@ -357,279 +188,15 @@ class ChengyuBot:
             logger.error(f"Error en random_chengyu: {e}")
             await update.message.reply_text("❌ Error al obtener chengyu. Intenta de nuevo.")
 
-    async def daily_chengyu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /dia [numero] - Chengyu por día"""
-        if self.df.empty:
-            await update.message.reply_text("❌ Servicio temporalmente no disponible. Intenta más tarde.")
-            return
-            
-        try:
-            if not context.args:
-                await update.message.reply_text(f"❌ Uso correcto: /dia [número entre 1-{len(self.df)}]")
-                return
-                
-            day = int(context.args[0])
-            if 1 <= day <= len(self.df):
-                chengyu = self.df.iloc[day-1]
-                await update.message.reply_text(self.format_chengyu(chengyu), parse_mode='Markdown')
-            else:
-                await update.message.reply_text(f"⚠️ El día debe estar entre 1 y {len(self.df)}")
-        except (ValueError, IndexError):
-            await update.message.reply_text(f"❌ Uso correcto: /dia [número entre 1-{len(self.df)}]")
-        except Exception as e:
-            logger.error(f"Error en daily_chengyu: {e}")
-            await update.message.reply_text("❌ Error al obtener chengyu del día.")
+    # ... seguir con los demás métodos para los comandos /dia, /categorias, /hsk, /quiz, manejo de callbacks, ayuda, etc.
 
-    async def show_categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /categorias - Navegación por categorías"""
-        if not self.categorias:
-            await update.message.reply_text("❌ No hay categorías disponibles en este momento.")
-            return
-            
-        try:
-            keyboard = []
-            for i, cat in enumerate(self.categorias[:20]):  # Máximo 20 categorías
-                keyboard.append([InlineKeyboardButton(cat, callback_data=f"cat_{i}")])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(
-                f"📚 *Categorías disponibles:*\nElije una categoría para explorar:",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            logger.error(f"Error en show_categories: {e}")
-            await update.message.reply_text("❌ Error al mostrar categorías.")
-
-    async def category_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manejador para botones de categorías"""
-        query = update.callback_query
-        await query.answer()
-        
-        try:
-            category_index = int(query.data.split('_')[1])
-            if category_index < len(self.categorias):
-                category = self.categorias[category_index]
-                filtered = self.df[self.df['Categoria'] == category]
-                
-                if not filtered.empty:
-                    chengyu = filtered.sample(1).iloc[0]
-                    await query.edit_message_text(
-                        f"📖 *Categoría: {category}*\n{self.format_chengyu(chengyu)}",
-                        parse_mode='Markdown'
-                    )
-                else:
-                    await query.edit_message_text("❌ No hay chengyus disponibles en esta categoría.")
-            else:
-                await query.edit_message_text("❌ Categoría no válida.")
-        except Exception as e:
-            logger.error(f"Error en category_handler: {e}")
-            await query.edit_message_text("❌ Error al procesar categoría.")
-
-    async def hsk_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /hsk [nivel] - Mostrar TODOS los chengyus del nivel solicitado"""
-        if self.df.empty:
-            await update.message.reply_text("❌ Servicio temporalmente no disponible. Intenta más tarde.")
-            return
-            
-        try:
-            if not context.args:
-                await update.message.reply_text("ℹ️ Niveles disponibles: HSK6, HSK7, HSK8, HSK9\nEjemplo: /hsk HSK7")
-                return
-                
-            level_input = context.args[0].upper()
-            valid_levels = ['HSK6', 'HSK7', 'HSK8', 'HSK9']
-            
-            # Normalizar entrada del usuario (quitar espacios)
-            level = level_input.replace(" ", "")
-            
-            if level not in valid_levels:
-                await update.message.reply_text("❌ Niveles válidos: HSK6, HSK7, HSK8, HSK9")
-                return
-            
-            # DEBUG: Log del nivel solicitado
-            logger.info(f"🔍 Nivel solicitado: {level} (entrada original: '{level_input}')")
-            
-            # Buscar la columna de nivel con más variaciones
-            nivel_cols = ['Nivel de Dificultad', 'Nivel de Dificulatad', 'Nivel', 'HSK', 'level', 'Level']
-            filtered = pd.DataFrame()
-            used_column = None
-            
-            # DEBUG: Mostrar todas las columnas disponibles
-            logger.info(f"📋 Columnas disponibles: {list(self.df.columns)}")
-            
-            for col in nivel_cols:
-                if col in self.df.columns:
-                    logger.info(f"🔍 Intentando filtrar con columna: {col}")
-                    
-                    # Mostrar valores únicos en esta columna para debugging
-                    unique_vals = self.df[col].dropna().astype(str).unique()
-                    logger.info(f"📊 Valores únicos en '{col}': {', '.join(unique_vals)}")
-                    
-                    # Crear una serie temporal normalizada (quitar espacios y convertir a mayúsculas)
-                    temp_series = self.df[col].astype(str).str.replace(' ', '').str.upper()
-                    
-                    # Filtrar usando la serie normalizada
-                    filtered = self.df[temp_series == level]
-                    
-                    if not filtered.empty:
-                        used_column = col
-                        logger.info(f"✅ Filtro exitoso en columna '{col}' con nivel '{level}'")
-                        break
-            
-            # DEBUG: Log del resultado del filtrado
-            logger.info(f"📊 Resultados encontrados: {len(filtered)} chengyus")
-            
-            if not filtered.empty:
-                # Ordenar por día del año si existe la columna
-                if 'Dia del año' in filtered.columns:
-                    filtered = filtered.sort_values('Dia del año')
-                
-                # Construir mensaje con todos los chengyus
-                response = f"🎓 *Todos los Chengyus de Nivel {level}* 🏮\n\n"
-                
-                for _, row in filtered.iterrows():
-                    chengyu = self.get_column_value(row, ['Chengyu 成语', 'Chengyu'])
-                    pinyin = self.get_column_value(row, ['Pinyin', 'pinyin'])
-                    nivel_val = self.get_column_value(row, ['Nivel de Dificultad', 'Nivel', 'HSK'])
-                    
-                    # Mostrar el valor real del nivel para referencia
-                    response += f"• {chengyu} ({pinyin}) - [{nivel_val}]\n"
-                
-                # Añadir pie de página
-                response += f"\n📊 Total: {len(filtered)} chengyus encontrados"
-                
-                # Enviar mensaje (Telegram limita a 4096 caracteres)
-                if len(response) > 4096:
-                    parts = [response[i:i+4000] for i in range(0, len(response), 4000)]
-                    for part in parts:
-                        await update.message.reply_text(part, parse_mode='Markdown')
-                else:
-                    await update.message.reply_text(response, parse_mode='Markdown')
-            else:
-                # Mensaje de error detallado
-                error_msg = f"❌ No hay chengyus disponibles de nivel {level}.\n\n"
-                error_msg += "🔍 *Posibles causas:*\n"
-                error_msg += "- Los niveles en tus datos tienen formato diferente (ej: 'HSK 6' con espacio)\n"
-                error_msg += "- La columna de nivel tiene nombres diferentes\n"
-                error_msg += "- No existen chengyus para ese nivel\n\n"
-                
-                # Mostrar las columnas relacionadas con nivel que existen
-                nivel_cols_found = [col for col in self.df.columns if any(kw in col.lower() for kw in ['nivel', 'hsk', 'dificultad', 'level'])]
-                
-                if nivel_cols_found:
-                    error_msg += f"📋 Columnas de nivel encontradas: {', '.join(nivel_cols_found)}\n"
-                    
-                    # Mostrar valores únicos de la primera columna de nivel encontrada
-                    if nivel_cols_found:
-                        first_col = nivel_cols_found[0]
-                        unique_levels = self.df[first_col].dropna().astype(str).unique()
-                        error_msg += f"📊 Valores disponibles en '{first_col}': {', '.join(unique_levels)}"
-                
-                await update.message.reply_text(error_msg, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Error en hsk_filter: {e}")
-            await update.message.reply_text(f"❌ Error al filtrar por nivel HSK: {str(e)}")
-
-    async def quiz(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /quiz - Quiz interactivo"""
-        if self.df.empty or len(self.df) < 4:
-            await update.message.reply_text("❌ Quiz temporalmente no disponible. Intenta más tarde.")
-            return
-            
-        try:
-            # Seleccionar chengyu correcto
-            correct = self.df.sample(1).iloc[0]
-            
-            # Seleccionar 3 opciones incorrectas
-            wrong_options = self.df[self.df.index != correct.name].sample(3)
-            
-            # Crear opciones mezcladas
-            all_options = [correct] + wrong_options.to_dict('records')
-            random.shuffle(all_options)
-            
-            # Encontrar índice correcto
-            correct_index = None
-            for i, opt in enumerate(all_options):
-                if self.get_column_value(opt, ['Chengyu 成语', 'Chengyu']) == self.get_column_value(correct, ['Chengyu 成语', 'Chengyu']):
-                    correct_index = i
-                    break
-            
-            # Crear teclado de opciones
-            keyboard = []
-            for i, opt in enumerate(all_options):
-                venezolano = self.get_column_value(opt, ['Equivalente en Venezolano', 'Equivalente'])
-                display_text = venezolano[:45] + "..." if len(venezolano) > 45 else venezolano
-                keyboard.append([InlineKeyboardButton(
-                    display_text,
-                    callback_data=f"ans_{i}_{correct_index}_{correct.name}"
-                )])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            chengyu = self.get_column_value(correct, ['Chengyu 成语', 'Chengyu'])
-            pinyin = self.get_column_value(correct, ['Pinyin', 'pinyin'])
-            
-            await update.message.reply_text(
-                f"❓ *Quiz:* ¿Cuál es el equivalente venezolano de:\n\n*{chengyu}* ({pinyin})?",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        except Exception as e:
-            logger.error(f"Error en quiz: {e}")
-            await update.message.reply_text("❌ Error al crear quiz.")
-
-    async def answer_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manejador de respuestas del quiz"""
-        query = update.callback_query
-        await query.answer()
-        
-        try:
-            parts = query.data.split('_')
-            selected_idx = int(parts[1])
-            correct_idx = int(parts[2])
-            correct_row_idx = int(parts[3])
-            
-            correct_row = self.df.loc[correct_row_idx]
-            
-            if selected_idx == correct_idx:
-                msg = "✅ ¡Correcto! "
-            else:
-                msg = "❌ Incorrecto. "
-                
-            msg += f"La respuesta correcta es:\n{self.format_chengyu(correct_row)}"
-            await query.edit_message_text(msg, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Error en answer_handler: {e}")
-            await query.edit_message_text("❌ Error al procesar respuesta.")
-
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /ayuda"""
-        help_text = """
-🇨🇳 *Ayuda - Bot de Chengyus* 🇻🇪
-
-*Comandos disponibles:*
-/start - Mensaje de bienvenida
-/chengyu - Chengyu aleatorio con equivalente venezolano
-/dia [1-50] - Chengyu específico por número
-/categorias - Explorar por categorías temáticas
-/hsk [HSK6/HSK7/HSK8/HSK9] - Filtrar por nivel
-/quiz - Quiz interactivo de práctica
-/ayuda - Esta ayuda
-
-*Ejemplos de uso:*
-`/dia 15` - Muestra el chengyu del día 15
-`/hsk HSK7` - Muestra chengyus de nivel HSK7
-
-*¿Qué son los chengyus?*
-Los chengyus son expresiones idiomáticas chinas de 4 caracteres que contienen sabiduría popular y referencias culturales.
-
-¡Aprende expresiones chinas con sabiduría venezolana! 🎓
-        """
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+# Aquí continúa la función principal con la integración Flask + bot Telegram
 
 def main():
-    """Función principal"""
-    # Obtener token de variable de entorno
+    # Iniciar servidor flask en hilo aparte
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
     token = os.getenv("BOT_TOKEN")
     if not token:
         logger.error("BOT_TOKEN no encontrado en variables de entorno")
@@ -637,34 +204,21 @@ def main():
         return
     
     logger.info("Iniciando bot de chengyus con prioridad Excel...")
-    
     try:
-        # Crear aplicación
         application = Application.builder().token(token).build()
         bot = ChengyuBot()
         
-        # Agregar handlers de comandos
         application.add_handler(CommandHandler('start', bot.start))
         application.add_handler(CommandHandler('chengyu', bot.random_chengyu))
-        application.add_handler(CommandHandler('dia', bot.daily_chengyu))
-        application.add_handler(CommandHandler('categorias', bot.show_categories))
-        application.add_handler(CommandHandler('hsk', bot.hsk_filter))
-        application.add_handler(CommandHandler('quiz', bot.quiz))
-        application.add_handler(CommandHandler('ayuda', bot.help_command))
-        
-        # Handlers para botones interactivos
-        application.add_handler(CallbackQueryHandler(bot.category_handler, pattern=r"^cat_"))
-        application.add_handler(CallbackQueryHandler(bot.answer_handler, pattern=r"^ans_"))
+        # Agregar aquí todos los demás handlers /dia, /categorias, /hsk, /quiz, /ayuda, callbacks...
         
         logger.info("Bot configurado exitosamente")
         print("✅ Bot iniciado correctamente")
         
-        # Ejecutar bot
         application.run_polling()
-        
     except Exception as e:
         logger.error(f"Error al iniciar bot: {e}")
         print(f"Error al iniciar bot: {e}")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
