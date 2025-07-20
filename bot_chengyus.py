@@ -1,22 +1,27 @@
 import os
 import logging
-import asyncio                     
-import aiohttp                     
+import asyncio
+import aiohttp
 import pandas as pd
 import random
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from threading import Thread
 from flask import Flask
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
 
-# Configurar logging
+# Configurar logging para la app
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Servidor Flask mínimo para puerto dummy
+# Servidor Flask mínimo para puerto dummy que Render detecta como vivo
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -30,14 +35,12 @@ def health():
 def run_flask():
     port = int(os.getenv("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port, debug=False)
-KEEPALIVE_URL = os.getenv(
-    "KEEPALIVE_URL", "https://bot-chengyus-railway.onrender.com/"
-)
+
+# Tarea asíncrona que mantiene el bot despierto haciendo ping a la URL cada 10 minutos
+KEEPALIVE_URL = os.getenv("KEEPALIVE_URL", "https://bot-chengyus-railway.onrender.com/")
 INTERVAL = 10 * 60  # 10 minutos
 
-
 async def keep_alive():
-    """Hace un ping HTTP cada 10 minutos para evitar hibernación."""
     async with aiohttp.ClientSession() as session:
         while True:
             try:
@@ -45,7 +48,6 @@ async def keep_alive():
             except Exception:
                 pass
             await asyncio.sleep(INTERVAL)
-
 
 class ChengyuBot:
     def __init__(self):
@@ -80,24 +82,31 @@ class ChengyuBot:
                 continue
             logger.info(f"📂 Intentando cargar {excel_file}")
             sheet_names = [
-                0, "Sheet1", "tabla_chengyus_completa_con_ref",
-                "tabla-chengyus-completa", "Datos", "chengyus", "Data"
+                0,
+                "Sheet1",
+                "tabla_chengyus_completa_con_ref",
+                "tabla-chengyus-completa",
+                "Datos",
+                "chengyus",
+                "Data",
             ]
             for sheet in sheet_names:
                 try:
                     df_test = pd.read_excel(
-                        excel_file, sheet_name=sheet, engine="openpyxl")
+                        excel_file, sheet_name=sheet, engine="openpyxl"
+                    )
                     if df_test.empty or len(df_test) < 10:
                         continue
                     if not self.validate_essential_columns(df_test):
                         continue
                     self.df = df_test
                     self.process_loaded_data()
-                    logger.info(f"✅ Excel cargado: {len(self.df)} chengyus desde {excel_file}, hoja {sheet}")
+                    logger.info(
+                        f"✅ Excel cargado: {len(self.df)} chengyus desde {excel_file}, hoja {sheet}"
+                    )
                     return True
                 except Exception as e:
                     logger.debug(f"Error con {excel_file} hoja {sheet}: {e}")
-                    continue
         logger.warning("❌ No se pudo cargar archivo Excel válido")
         return False
 
@@ -276,7 +285,6 @@ class ChengyuBot:
         self.process_loaded_data()
         logger.info(f"✅ Datos embebidos cargados: {len(self.df)} chengyus")
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /start para iniciar conversación"""
         welcome_msg = """
 🇨🇳 *Bot de Chengyus Chino-Venezolanos* 🇻🇪
 
@@ -295,7 +303,6 @@ class ChengyuBot:
         await update.message.reply_text(welcome_msg, parse_mode="Markdown")
 
     async def random_chengyu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /chengyu para obtener un chengyu aleatorio"""
         if self.df.empty:
             await update.message.reply_text(
                 "❌ Servicio temporalmente no disponible. Intenta más tarde."
@@ -311,7 +318,6 @@ class ChengyuBot:
             await update.message.reply_text("❌ Error al obtener chengyu. Inténtalo de nuevo.")
 
     async def daily_chengyu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /dia [número] para chengyu del día"""
         if self.df.empty:
             await update.message.reply_text(
                 "❌ Servicio temporalmente no disponible. Intenta más tarde."
@@ -336,27 +342,21 @@ class ChengyuBot:
             await update.message.reply_text("❌ Error al obtener el chengyu del día.")
 
     async def show_categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /categorias para mostrar categorías disponibles"""
         if not self.categorias:
             await update.message.reply_text("❌ No hay categorías disponibles.")
             return
-        try:
-            teclado = [
-                [InlineKeyboardButton(cat, callback_data=f"cat_{i}")]
-                for i, cat in enumerate(self.categorias[:20])  # Limitar a 20 categorías
-            ]
-            reply_markup = InlineKeyboardMarkup(teclado)
-            await update.message.reply_text(
-                "📚 *Categorías disponibles:*\nSelecciona una categoría:",
-                reply_markup=reply_markup,
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            logger.error(f"Error en show_categories: {e}")
-            await update.message.reply_text("❌ Error al mostrar categorías.")
+        teclado = [
+            [InlineKeyboardButton(cat, callback_data=f"cat_{i}")]
+            for i, cat in enumerate(self.categorias[:20])
+        ]
+        reply_markup = InlineKeyboardMarkup(teclado)
+        await update.message.reply_text(
+            "📚 *Categorías disponibles:*\nSelecciona una categoría:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+        )
 
     async def category_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manejador para respuesta de botones de categorías"""
         query = update.callback_query
         await query.answer()
         try:
@@ -377,8 +377,8 @@ class ChengyuBot:
         except Exception as e:
             logger.error(f"Error en category_handler: {e}")
             await query.edit_message_text("❌ Error al procesar la categoría.")
+
     async def hsk_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /hsk [nivel] filtra chengyus por nivel HSK"""
         if self.df.empty:
             await update.message.reply_text(
                 "❌ Servicio temporalmente no disponible. Intenta más tarde."
@@ -415,16 +415,16 @@ class ChengyuBot:
             if filtf.empty:
                 await update.message.reply_text(f"❌ No hay chengyus de nivel {nivel_input}.")
                 return
-            
+
             respuesta = f"🎓 *Todos los Chengyus nivel {nivel_input}* 🏮\n\n"
             for _, row in filtf.iterrows():
                 chengyu = self.get_column_value(row, ["Chengyu 成语", "Chengyu"])
                 pinyin = self.get_column_value(row, ["Pinyin", "pinyin"])
                 nivel = self.get_column_value(row, ["Nivel de Dificultad", "Nivel", "HSK"])
                 respuesta += f"• {chengyu} ({pinyin}) - [{nivel}]\n"
-            
+
             # Telegram límite es 4096 chars, dividimos si hace falta
-            for part in [respuesta[i : i + 4000] for i in range(0, len(respuesta), 4000)]:
+            for part in [respuesta[i: i + 4000] for i in range(0, len(respuesta), 4000)]:
                 await update.message.reply_text(part, parse_mode="Markdown")
 
         except Exception as e:
@@ -432,7 +432,6 @@ class ChengyuBot:
             await update.message.reply_text(f"❌ Error al filtrar nivel HSK: {e}")
 
     async def quiz(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Comando /quiz para prueba interactiva"""
         if self.df.empty or len(self.df) < 4:
             await update.message.reply_text("❌ Quiz temporalmente no disponible. Intenta más tarde.")
             return
@@ -449,7 +448,7 @@ class ChengyuBot:
                 ):
                     index_correcto = i
                     break
-            
+
             teclado = []
             for i, opt in enumerate(todas_opciones):
                 texto = self.get_column_value(opt, ["Equivalente en Venezolano", "Equivalente"])
@@ -470,7 +469,6 @@ class ChengyuBot:
             await update.message.reply_text("❌ Error al crear el quiz.")
 
     async def answer_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Manejador de respuestas para el quiz"""
         query = update.callback_query
         await query.answer()
         try:
@@ -503,7 +501,7 @@ class ChengyuBot:
 /ayuda - Mostrar esta ayuda
 
 *Ejemplos:*
-`/dia 15` - Chsngyu del día 15
+`/dia 15` - Chengyu del día 15
 `/hsk HSK7` - Chengyus nivel HSK7
 
 Los chengyus son expresiones idiomáticas chinas de 4 caracteres con gran significado cultural.
@@ -511,12 +509,13 @@ Los chengyus son expresiones idiomáticas chinas de 4 caracteres con gran signif
 ¡Disfruta aprendiendo! 🎓
 """
         await update.message.reply_text(texto_ayuda, parse_mode="Markdown")
+
 def main():
     # Arrancar servidor Flask en hilo separado para puerto dummy
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    # Cargar token del bot de variable de entorno
+    # Cargar token del bot desde variable de entorno
     token = os.getenv("BOT_TOKEN")
     if not token:
         logger.error("BOT_TOKEN no encontrado en variables de entorno")
@@ -530,7 +529,7 @@ def main():
         application = Application.builder().token(token).build()
         bot = ChengyuBot()
 
-        # Agregar handlers de comandos
+        # Handlers de comandos
         application.add_handler(CommandHandler("start", bot.start))
         application.add_handler(CommandHandler("chengyu", bot.random_chengyu))
         application.add_handler(CommandHandler("dia", bot.daily_chengyu))
@@ -539,11 +538,14 @@ def main():
         application.add_handler(CommandHandler("quiz", bot.quiz))
         application.add_handler(CommandHandler("ayuda", bot.help_command))
 
-        # Agregar handlers para botones interactivos
+        # Handlers para botones interactivos
         application.add_handler(CallbackQueryHandler(bot.category_handler, pattern=r"^cat_"))
         application.add_handler(CallbackQueryHandler(bot.answer_handler, pattern=r"^ans_"))
 
-        logger.info("Bot configurado exitosamente, iniciando polling...")
+        # Lanzar tarea keep-alive antes del polling
+        asyncio.get_event_loop().create_task(keep_alive())
+
+        logger.info("Bot configurado exitosamente, iniciando polling…")
         print("✅ Bot iniciado correctamente")
 
         # Ejecutar bot con polling
@@ -553,8 +555,6 @@ def main():
         logger.error(f"Error al iniciar bot: {e}")
         print(f"Error al iniciar bot: {e}")
 
-
 if __name__ == "__main__":
     main()
-
 
