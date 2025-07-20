@@ -1,5 +1,7 @@
 import os
 import logging
+import asyncio                     
+import aiohttp                     
 import pandas as pd
 import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -28,6 +30,22 @@ def health():
 def run_flask():
     port = int(os.getenv("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port, debug=False)
+KEEPALIVE_URL = os.getenv(
+    "KEEPALIVE_URL", "https://bot-chengyus-railway.onrender.com/"
+)
+INTERVAL = 10 * 60  # 10 minutos
+
+
+async def keep_alive():
+    """Hace un ping HTTP cada 10 minutos para evitar hibernación."""
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                await session.get(KEEPALIVE_URL, timeout=10)
+            except Exception:
+                pass
+            await asyncio.sleep(INTERVAL)
+
 
 class ChengyuBot:
     def __init__(self):
@@ -527,24 +545,6 @@ def main():
 
         logger.info("Bot configurado exitosamente, iniciando polling...")
         print("✅ Bot iniciado correctamente")
-
-        import asyncio, aiohttp, os, signal
-
-KEEPALIVE_URL = os.getenv("KEEPALIVE_URL", "https://bot-chengyus-railway.onrender.com/")
-INTERVAL = 10 * 60     # 10 minutos
-
-async def keep_alive():
-    async with aiohttp.ClientSession() as session:
-        while True:
-            try:
-                await session.get(KEEPALIVE_URL, timeout=10)
-            except Exception:
-                pass
-            await asyncio.sleep(INTERVAL)
-
-# … dentro de main() antes de run_polling()
-application = Application.builder().token(token).build()
-asyncio.get_event_loop().create_task(keep_alive())
 
         # Ejecutar bot con polling
         application.run_polling()
